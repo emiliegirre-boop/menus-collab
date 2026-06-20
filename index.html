@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>🍽️ Menus Collab</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F0EBE1; font-family: 'DM Sans', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+    input, textarea, select, button { font-family: inherit; }
+    textarea { resize: none; }
+    button { transition: opacity .15s, transform .1s; }
+    button:active { transform: scale(.97); }
+    input:focus, textarea:focus, select:focus { outline: none; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #C8BFB5; border-radius: 4px; }
+    @keyframes slideUp { from { transform: translateY(100%); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    @keyframes fadeIn  { from { opacity:0; } to { opacity:1; } }
+    .modal-sheet { animation: slideUp .25s cubic-bezier(.32,.72,0,1); }
+    .modal-bg    { animation: fadeIn .2s ease; }
+    @keyframes checkPop { 0%{transform:scale(0)} 60%{transform:scale(1.2)} 100%{transform:scale(1)} }
+    .check-pop { animation: checkPop .25s ease forwards; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/* ═══════════════════════════════════════════════════════════════════
+   🔧  CONFIGURATION FIREBASE  — À REMPLIR AVANT UTILISATION
+   
+   1. Allez sur https://console.firebase.google.com
+   2. Créer un projet → Continuer → Continuer
+   3. Build → Realtime Database → Create Database → Test mode → OK
+   4. Paramètres du projet (⚙️) → Vos applications → </> → Enregistrer
+   5. Copiez les valeurs ci-dessous
+═══════════════════════════════════════════════════════════════════ */
+const FIREBASE_CONFIG = {
+
+  apiKey: "AIzaSyANvUJuyUawt60hB_pC5MwSfG0sY0J-xZs",
+
+  authDomain: "menuscollaboratifs.firebaseapp.com",
+
+  databaseURL: "https://menuscollaboratifs-default-rtdb.europe-west1.firebasedatabase.app",
+
+  projectId: "menuscollaboratifs",
+
+  storageBucket: "menuscollaboratifs.firebasestorage.app",
+
+  messagingSenderId: "994011553235",
+
+  appId: "1:994011553235:web:9d1c7c3292bd65fff8a326",
+
+  measurementId: "G-M8V42SX4LX"
+
+};
+/* ══════════════════════════════════════════════════════════════════ */
+
+// ── Firebase init ────────────────────────────────────────────────────────────
+let db = null;
+try {
+  if (FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+  } else { console.warn("Firebase non configuré — mode local (localStorage)"); }
+} catch(e) { console.warn("Firebase erreur :", e.message); }
+
+async function dbLoad() {
+  try {
+    if (db) {
+      const s = await db.ref("menus").get();
+      return s.exists() ? s.val() : null;
+    }
+  } catch(e) { console.warn("Firebase lecture échouée, fallback localStorage"); }
+  try { return JSON.parse(localStorage.getItem("menus")); } catch { return null; }
+}
+async function dbSave(data) {
+  try {
+    if (db) { await db.ref("menus").set(data); return; }
+  } catch(e) { console.warn("Firebase écriture échouée, fallback localStorage"); }
+  try { localStorage.setItem("menus", JSON.stringify(data)); } catch {}
+}
+
+// ── Constants ────────────────────────────────────────────────────────────────
+const { useState, useEffect, useRef } = React;
+const DAYS  = ["Samedi","Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+function getDayName(startDate, i) {
+  try {
+    const d = new Date((startDate||new Date().toISOString().split("T")[0])+"T00:00:00");
+    d.setDate(d.getDate()+i);
+    const s = d.toLocaleDateString("fr-FR",{weekday:"long"});
+    return s.charAt(0).toUpperCase()+s.slice(1);
+  } catch { return "Jour "+(i+1); }
+}
+function makePlanDay(startDate, i, nC) {
+  const n = Math.max(1, nC||1);
+  return { midiCouple:i%n, midiPersons:8, midiMenu:"",
+           soirCouple:(i+Math.max(1,Math.floor(n/2)))%n, soirPersons:8, soirMenu:"", soirNotes:"" };
+}
+const CP    = [
+  { dot:"#4A7FA5", light:"#F4F7FA", mid:"#C8DCE8", dark:"#2C5A7A" }, // bleu ardoise
+  { dot:"#4A8C60", light:"#F3F7F4", mid:"#B8D4C0", dark:"#2A5A3C" }, // sauge
+  { dot:"#9A7840", light:"#FAF6EF", mid:"#DED0B0", dark:"#6A5020" }, // ocre
+  { dot:"#8A6070", light:"#FAF3F5", mid:"#DCC0CA", dark:"#5A3048" }, // mauve
+  { dot:"#5A6A8A", light:"#F4F5F8", mid:"#C0C8D8", dark:"#38486A" }, // gris-bleu
+  { dot:"#6A8A60", light:"#F4F7F3", mid:"#C0D4B8", dark:"#3C6038" }, // olive
+  { dot:"#8A6A40", light:"#F8F4EF", mid:"#D8C8B0", dark:"#5A4220" }, // brun chaud
+  { dot:"#7A608A", light:"#F6F4F8", mid:"#CCC0D8", dark:"#4A3860" }, // prune
+];
+const CP_MAX = 8;
+const T = {
+  bg:     "#F5F2EC",
+  card:   "#FFFFFF",
+  brand:  "#1A1714",
+  gold:   "#B8954A",
+  text:   "#1A1714",
+  muted:  "#7A7468",
+  border: "#E4E0D8",
+  shadow: "0 1px 4px rgba(0,0,0,.06)",
+};
+const CATS  = ["🥦 Fruits & Légumes","🥩 Viandes & Poissons","🧀 Produits Laitiers",
+               "🌾 Épicerie sèche","🥖 Boulangerie","🥤 Boissons","❄️ Surgelés",
+               "🌿 Épices & Herbes","🥫 Conserves","🧴 Hygiène","📦 Autre"];
+const UNITS = ["g","kg","ml","L","cl","pièce","botte","sachet","boîte","paquet","tranche","autre"];
+const uid   = () => Math.random().toString(36).slice(2,9);
+
+function defaultData() {
+  const d = new Date();
+  d.setDate(d.getDate()+((6-d.getDay()+7)%7));
+  const startDate = d.toISOString().split("T")[0];
+  const couples = ["Famille Martin","Famille Dupont","Famille Bernard","Famille Leroy"];
+  const numDays = 8;
+  return {
+    config: { startDate, numDays, couples },
+    planning: Array.from({length:numDays},(_,i)=>makePlanDay(startDate,i,couples.length)),
+    courses: [],
+  };
+}
+
+// Normalise les données chargées pour garantir tous les champs
+function normalizeData(raw) {
+  const def = defaultData();
+  const config = { ...def.config, ...(raw.config||{}) };
+  // Compat: ancienne clé weekStart → startDate
+  if (!config.startDate && config.weekStart) { config.startDate=config.weekStart; }
+  if (!config.numDays) config.numDays = (raw.planning||[]).length || 8;
+  const nC = (config.couples||[]).length||1;
+  const rawP = raw.planning||[];
+  const planning = Array.from({length:config.numDays},(_,i)=>({
+    ...makePlanDay(config.startDate,i,nC), ...(rawP[i]||{})
+  }));
+  return { config, planning, courses:Array.isArray(raw.courses)?raw.courses:[] };
+}
+
+function fmtDate(ws, i) {
+  if (!ws) return "";
+  const d = new Date(ws + "T00:00:00");
+  d.setDate(d.getDate() + i);
+  return d.toLocaleDateString("fr-FR", { day:"numeric", month:"short" });
+}
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const S = {
+  card:  { background:"#FFFFFF", borderRadius:"16px", border:"1px solid #E4E0D8",
+           boxShadow:"0 1px 4px rgba(0,0,0,.06)", overflow:"hidden" },
+  label: { fontSize:"10px", fontWeight:700, letterSpacing:"0.8px", color:"#9A9289",
+           textTransform:"uppercase", display:"block", marginBottom:"7px" },
+  input: { width:"100%", border:"1px solid #DDD9D2", borderRadius:"10px", padding:"11px 14px",
+           fontSize:"14px", outline:"none", background:"#FDFCFA" },
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  APP
+// ═════════════════════════════════════════════════════════════════════════════
+function App() {
+  const [tab,    setTab]    = useState("planning");
+  const [data,   setData]   = useState(null);
+  const [sync,   setSync]   = useState("ok");
+  const timer = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await dbLoad();
+        setData(stored ? normalizeData(stored) : defaultData());
+      } catch(e) {
+        console.error("Erreur chargement:", e);
+        setData(defaultData());
+      }
+    })();
+    const poll = setInterval(async () => {
+      const stored = await dbLoad();
+      if (stored) setData(stored);
+    }, 20000);
+    return () => clearInterval(poll);
+  }, []);
+
+  const update = (fn) => {
+    setData(prev => {
+      // Garantit que les tableaux existent toujours avant d'appeler fn
+      const safe = JSON.parse(JSON.stringify(prev));
+      if (!Array.isArray(safe.courses))  safe.courses  = [];
+      if (!Array.isArray(safe.planning)) safe.planning = [];
+      if (!safe.config)                  safe.config   = {};
+      if (!Array.isArray(safe.config.couples)) safe.config.couples = ["Famille 1"];
+      const next = fn(safe);
+      if (!Array.isArray(next.courses))  next.courses  = [];
+      clearTimeout(timer.current);
+      setSync("saving");
+      timer.current = setTimeout(async () => { await dbSave(next); setSync("ok"); }, 600);
+      return next;
+    });
+  };
+
+  if (!data) return (
+    <div style={{ minHeight:"100vh", background:"#F5F2EC", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:"56px", marginBottom:"16px" }}>🍽️</div>
+        <p style={{ color:"#9C8C7C", fontSize:"15px" }}>Chargement…</p>
+      </div>
+    </div>
+  );
+
+  const TABS = [{id:"planning",icon:"📅",label:"Planning"},{id:"courses",icon:"🛒",label:"Courses"},
+                {id:"bilan",icon:"📊",label:"Bilan"},{id:"config",icon:"⚙️",label:"Config"}];
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#F5F2EC", maxWidth:"448px", margin:"0 auto" }}>
+      {/* Header */}
+      <div style={{ background:"#1A1714", color:"white", padding:"14px 18px",
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                    position:"sticky", top:0, zIndex:20 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:"16px", letterSpacing:"-0.3px" }}>
+            Menus Collab
+          </div>
+          <div style={{ fontSize:"11px", color:"#9A9289", marginTop:"2px" }}>
+            {fmtDate(data.config.startDate,0)} — {fmtDate(data.config.startDate,data.planning.length-1)}
+            <span style={{ marginLeft:"5px" }}>· {data.planning.length} jours</span>
+          </div>
+        </div>
+        <div style={{ fontSize:"10px", color:sync==="ok"?"#6A9A7A":"#B8954A",
+                      fontWeight:600, letterSpacing:".3px" }}>
+          {sync==="ok"?"✓ sync":"● sync…"}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ paddingBottom:"76px" }}>
+        {tab==="planning" && <PlanningTab data={data} update={update} />}
+        {tab==="courses"  && <CoursesTab  data={data} update={update} />}
+        {tab==="bilan"    && <BilanTab    data={data} />}
+        {tab==="config"   && <ConfigTab   data={data} update={update} />}
+      </div>
+
+      {/* Bottom nav */}
+      <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%",
+                    maxWidth:"448px", background:"#FFFFFF",
+                    borderTop:"1px solid #E4E0D8", display:"flex", zIndex:20 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ flex:1, padding:"10px 4px 12px", display:"flex", flexDirection:"column",
+                     alignItems:"center", gap:"3px", background:"none", border:"none", cursor:"pointer",
+                     color:tab===t.id?"#1A1714":"#B0AA9E",
+                     borderTop:tab===t.id?"2px solid #1A1714":"2px solid transparent" }}>
+            <span style={{ fontSize:"20px" }}>{t.icon}</span>
+            <span style={{ fontSize:"10px", fontWeight:tab===t.id?700:400 }}>{t.label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  PLANNING
+// ═════════════════════════════════════════════════════════════════════════════
+function PlanningTab({ data, update }) {
+  const [open, setOpen] = useState(null);
+  const { config, planning = [] } = data;
+
+  return (
+    <div style={{ padding:"14px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      {/* Récap par couple : midi + soir */}
+      <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"4px" }}>
+        {config.couples.map((name,i) => {
+          const cp = CP[i%CP.length];
+          const midiDays = planning.map((d,idx)=>d.midiCouple===i?getDayName(config.startDate,idx).slice(0,3):null).filter(Boolean).join(", ");
+          const soirDays = planning.map((d,idx)=>d.soirCouple===i?getDayName(config.startDate,idx).slice(0,3):null).filter(Boolean).join(", ");
+          return (
+            <div key={i} style={{ background:cp.light, border:`1px solid ${cp.mid}`, borderRadius:"12px",
+                                   padding:"5px 10px", fontSize:"11px", color:cp.dark, fontWeight:600 }}>
+              <div>{name.split(" ").slice(-1)[0]}</div>
+              {midiDays && <div style={{ fontWeight:400 }}>☀️ {midiDays}</div>}
+              {soirDays && <div style={{ fontWeight:400 }}>🌙 {soirDays}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {planning.map((day,i) => {
+        const cpM = CP[(day.midiCouple??0)%CP.length];
+        const cpS = CP[day.soirCouple%CP.length];
+        const dayName = getDayName(config.startDate, i);
+        const isOpen = open===i;
+        return (
+          <div key={i} style={{ ...S.card,
+                    border:`1px solid ${isOpen?"#C8C4BC":"#E4E0D8"}` }}>
+            <button onClick={() => setOpen(isOpen?null:i)}
+              style={{ width:"100%", padding:"12px 14px", display:"flex", alignItems:"center",
+                       gap:"10px", background:"none", border:"none", cursor:"pointer", textAlign:"left" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:700, fontSize:"15px", color:"#1A1A1A" }}>
+                  {dayName}
+                  <span style={{ fontWeight:400, fontSize:"12px", color:"#B0A090", marginLeft:"8px" }}>{fmtDate(config.startDate,i)}</span>
+                </div>
+                {!isOpen && (day.midiMenu||day.soirMenu) && (
+                  <div style={{ fontSize:"12px", color:"#9C8C7C", marginTop:"2px" }}>
+                    {day.midiMenu && <span>☀️ {day.midiMenu.slice(0,28)}{day.midiMenu.length>28?"…":""}</span>}
+                    {day.soirMenu && <span style={{ marginLeft:"8px" }}>🌙 {day.soirMenu.slice(0,28)}{day.soirMenu.length>28?"…":""}</span>}
+                  </div>
+                )}
+              </div>
+              {/* Badges midi + soir */}
+              <div style={{ display:"flex", gap:"4px", flexShrink:0 }}>
+                <div style={{ background:cpM.light, color:cpM.dark, fontSize:"10px", fontWeight:700,
+                               padding:"3px 7px", borderRadius:"20px", border:`1px solid ${cpM.mid}` }}>
+                  ☀️ {config.couples[day.midiCouple ?? 0].split(" ").slice(-1)[0]}
+                </div>
+                <div style={{ background:cpS.light, color:cpS.dark, fontSize:"10px", fontWeight:700,
+                               padding:"3px 7px", borderRadius:"20px", border:`1px solid ${cpS.mid}` }}>
+                  🌙 {config.couples[day.soirCouple].split(" ").slice(-1)[0]}
+                </div>
+              </div>
+              <span style={{ color:"#C4B9AD", fontSize:"12px" }}>{isOpen?"▲":"▼"}</span>
+            </button>
+
+            {isOpen && (
+              <div style={{ borderTop:"1px solid #F0EAE2", padding:"14px", display:"flex", flexDirection:"column", gap:"14px" }}>
+                {/* ── MIDI ── */}
+                <div style={{ background:"#FAF9F7", border:"1px solid #E4E0D8", borderRadius:"12px", padding:"12px" }}>
+                  <label style={{ ...S.label }}>☀️ Midi</label>
+                  <div style={{ display:"flex", gap:"8px", marginBottom:"8px" }}>
+                    <select value={day.midiCouple ?? 0}
+                      onChange={e => update(d => { d.planning[i].midiCouple=+e.target.value; return d; })}
+                      style={{ flex:1, background:"#FDFCFA", border:"1px solid #DDD9D2", borderRadius:"10px",
+                               padding:"9px 12px", fontSize:"13px", color:"#1A1714", fontWeight:600, outline:"none" }}>
+                      {config.couples.map((c,j) => <option key={j} value={j}>{c}</option>)}
+                    </select>
+                    <input type="number" value={day.midiPersons ?? 8} min={1} max={50}
+                      onChange={e => update(d => { d.planning[i].midiPersons=+e.target.value; return d; })}
+                      style={{ width:"56px", border:"1px solid #DDD9D2", borderRadius:"10px",
+                               padding:"9px 6px", fontSize:"14px", textAlign:"center", outline:"none", background:"#FDFCFA" }} />
+                    <span style={{ alignSelf:"center", fontSize:"12px", color:"#9C8C7C" }}>pers.</span>
+                  </div>
+                  <textarea value={day.midiMenu} rows={2}
+                    onChange={e => update(d => { d.planning[i].midiMenu=e.target.value; return d; })}
+                    placeholder="Menu du midi…"
+                    style={{ width:"100%", background:"#FDFCFA", border:"1px solid #DDD9D2", borderRadius:"10px",
+                             padding:"10px 12px", fontSize:"14px", outline:"none" }} />
+                </div>
+
+                {/* ── SOIR ── */}
+                <div style={{ background:"#FAF9F7", border:"1px solid #E4E0D8", borderRadius:"12px", padding:"12px" }}>
+                  <label style={{ ...S.label }}>🌙 Soir</label>
+                  <div style={{ display:"flex", gap:"8px", marginBottom:"8px" }}>
+                    <select value={day.soirCouple}
+                      onChange={e => update(d => { d.planning[i].soirCouple=+e.target.value; return d; })}
+                      style={{ flex:1, background:"#FDFCFA", border:"1px solid #DDD9D2", borderRadius:"10px",
+                               padding:"9px 12px", fontSize:"13px", color:"#1A1714", fontWeight:600, outline:"none" }}>
+                      {config.couples.map((c,j) => <option key={j} value={j}>{c}</option>)}
+                    </select>
+                    <input type="number" value={day.soirPersons} min={1} max={50}
+                      onChange={e => update(d => { d.planning[i].soirPersons=+e.target.value; return d; })}
+                      style={{ width:"56px", border:"1px solid #DDD9D2", borderRadius:"10px",
+                               padding:"9px 6px", fontSize:"14px", textAlign:"center", outline:"none", background:"#FDFCFA" }} />
+                    <span style={{ alignSelf:"center", fontSize:"12px", color:"#9C8C7C" }}>pers.</span>
+                  </div>
+                  <textarea value={day.soirMenu} rows={2}
+                    onChange={e => update(d => { d.planning[i].soirMenu=e.target.value; return d; })}
+                    placeholder="Menu du soir…"
+                    style={{ width:"100%", background:"#FDFCFA", border:"1px solid #DDD9D2", borderRadius:"10px",
+                             padding:"10px 12px", fontSize:"14px", outline:"none", marginBottom:"8px" }} />
+                  <input value={day.soirNotes}
+                    onChange={e => update(d => { d.planning[i].soirNotes=e.target.value; return d; })}
+                    placeholder="Notes…"
+                    style={{ ...S.input, fontStyle:"italic", color:"#7A7468", fontSize:"13px" }} />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  COURSES
+// ═════════════════════════════════════════════════════════════════════════════
+function CoursesTab({ data, update }) {
+  const { config, courses = [] } = data;
+  const [activeC, setActiveC] = useState(0);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ ingredient:"", category:CATS[0], unit:"pièce", qtyMagasin:"", qtyDrive:"", qtyChezSoi:"" });
+
+  const mine  = courses.filter(c => c.couple===activeC);
+  const cp    = CP[activeC];
+  const done  = mine.filter(c=>c.done).length;
+
+  const addItem = () => {
+    if (!form.ingredient.trim()) return;
+    update(d => { if(!Array.isArray(d.courses)) d.courses=[]; d.courses.push({ id:uid(), couple:activeC, done:false, ...form, ingredient:form.ingredient.trim() }); return d; });
+    setForm({ ingredient:"", category:CATS[0], unit:"pièce", qtyMagasin:"", qtyDrive:"", qtyChezSoi:"" });
+    setShowAdd(false);
+  };
+
+  return (
+    <div>
+      {/* Couple tabs */}
+      <div style={{ background:"white", borderBottom:"1px solid #E8E0D6", display:"flex" }}>
+        {config.couples.map((name,i) => {
+          const c = CP[i];
+          const pending = courses.filter(x=>x.couple===i&&!x.done).length;
+          return (
+            <button key={i} onClick={() => setActiveC(i)}
+              style={{ flex:1, padding:"10px 4px", background:"none", border:"none", cursor:"pointer",
+                       borderBottom:`3px solid ${activeC===i?c.dot:"transparent"}`,
+                       color:activeC===i?c.dark:"#B0A090" }}>
+              <div style={{ fontSize:"10px", fontWeight:700 }}>{name.split(" ").slice(-1)[0]}</div>
+              {pending>0 && <div style={{ fontSize:"11px", background:c.dot, color:"white", borderRadius:"10px",
+                                           padding:"0 5px", fontWeight:700, marginTop:"2px", display:"inline-block" }}>{pending}</div>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ background:"white", padding:"10px 16px",
+                    display:"flex", justifyContent:"space-between", alignItems:"center",
+                    borderBottom:"1px solid #EAE4DC" }}>
+        <span style={{ fontSize:"14px", fontWeight:600, color:"#1A1714" }}>{config.couples[activeC]}</span>
+        <span style={{ fontSize:"12px", color:"#7A7468" }}>
+          {done}/{mine.length} acheté·s
+        </span>
+      </div>
+      {mine.length>0 && (
+        <div style={{ height:"2px", background:"#EAE4DC" }}>
+          <div style={{ height:"100%", background:"#1A1714",
+                         width:`${mine.length?(done/mine.length*100):0}%`, transition:"width .4s ease" }} />
+        </div>
+      )}
+
+      <div style={{ padding:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
+        {mine.length===0 && (
+          <div style={{ textAlign:"center", padding:"40px 20px", color:"#C4B9AD" }}>
+            <div style={{ fontSize:"40px", marginBottom:"8px" }}>🛒</div>
+            <p style={{ fontSize:"13px" }}>Aucun article — ajoutez-en ci-dessous</p>
+          </div>
+        )}
+        {mine.map(item => (
+          <CourseItem key={item.id} item={item} cp={CP[item.couple]}
+            onToggle={()=>update(d=>{const it=d.courses.find(c=>c.id===item.id);if(it)it.done=!it.done;return d;})}
+            onRemove={()=>update(d=>{d.courses=d.courses.filter(c=>c.id!==item.id);return d;})}
+            onEdit={(f,v)=>update(d=>{const it=d.courses.find(c=>c.id===item.id);if(it)it[f]=v;return d;})} />
+        ))}
+        <button onClick={()=>setShowAdd(true)}
+          style={{ border:"1.5px dashed #C8C4BC", background:"transparent", borderRadius:"12px",
+                   padding:"14px", fontSize:"13px", fontWeight:600, color:"#7A7468", cursor:"pointer",
+                   marginTop:"4px", width:"100%", display:"flex", alignItems:"center",
+                   justifyContent:"center", gap:"6px" }}>
+          <span style={{ fontSize:"16px", lineHeight:1 }}>＋</span> Ajouter un article
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="modal-bg" style={{ position:"fixed", inset:0, background:"rgba(20,15,10,0.6)", zIndex:50,
+                      backdropFilter:"blur(4px)", WebkitBackdropFilter:"blur(4px)", display:"flex", alignItems:"flex-end" }}>
+          <div className="modal-sheet" style={{ background:"white", width:"100%", maxWidth:"448px", margin:"0 auto",
+                        borderRadius:"24px 24px 0 0", padding:"8px 20px 20px", maxHeight:"92vh", overflowY:"auto" }}>
+          <div style={{ width:"40px", height:"4px", borderRadius:"2px", background:"#E0D9D2",
+                        margin:"0 auto 16px" }} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
+              <h3 style={{ fontWeight:700, fontSize:"16px", color:"#1A1A1A" }}>Nouvel article</h3>
+              <button onClick={()=>setShowAdd(false)} style={{ background:"none", border:"none", fontSize:"22px", color:"#9C8C7C", cursor:"pointer" }}>✕</button>
+            </div>
+            <input autoFocus value={form.ingredient}
+              onChange={e=>setForm(p=>({...p,ingredient:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&addItem()}
+              placeholder="Nom de l'ingrédient *"
+              style={{ ...S.input, fontSize:"15px", marginBottom:"12px" }} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:"12px" }}>
+              <div>
+                <label style={{ ...S.label, color:"#B8860B" }}>🏪 Magasin</label>
+                <input value={form.qtyMagasin} onChange={e=>setForm(p=>({...p,qtyMagasin:e.target.value}))}
+                  placeholder="qté"
+                  style={{ ...S.input, background:"#FFFBF0", border:"1px solid #F0D88A" }} />
+              </div>
+              <div>
+                <label style={{ ...S.label, color:"#1D4ED8" }}>🚗 Drive</label>
+                <input value={form.qtyDrive} onChange={e=>setForm(p=>({...p,qtyDrive:e.target.value}))}
+                  placeholder="qté"
+                  style={{ ...S.input, background:"#EFF6FF", border:"1px solid #BFDBFE" }} />
+              </div>
+              <div>
+                <label style={{ ...S.label, color:"#166534" }}>🏠 Chez moi</label>
+                <input value={form.qtyChezSoi} onChange={e=>setForm(p=>({...p,qtyChezSoi:e.target.value}))}
+                  placeholder="qté"
+                  style={{ ...S.input, background:"#F0FDF4", border:"1px solid #86EFAC" }} />
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginBottom:"16px" }}>
+              <div>
+                <label style={S.label}>Unité</label>
+                <select value={form.unit} onChange={e=>setForm(p=>({...p,unit:e.target.value}))}
+                  style={{ ...S.input, padding:"9px 10px", fontSize:"13px" }}>
+                  {UNITS.map(u=><option key={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>Catégorie</label>
+                <select value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}
+                  style={{ ...S.input, padding:"9px 10px", fontSize:"13px" }}>
+                  {CATS.map(c=><option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            <button onClick={addItem}
+              style={{ width:"100%", background:"#1A1714", color:"white", border:"none", borderRadius:"12px",
+                       padding:"14px", fontSize:"15px", fontWeight:600, cursor:"pointer" }}>
+              Ajouter
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CourseItem({ item, cp, onToggle, onRemove, onEdit }) {
+  const [exp, setExp] = useState(false);
+  return (
+    <div style={{ background:item.done?"#F8F7F5":"white",
+                  border:`1px solid ${item.done?"#E4DDD6":cp.mid}`,
+                  borderRadius:"14px", overflow:"hidden", opacity:item.done?0.6:1,
+                  boxShadow:item.done?"none":"0 1px 4px rgba(0,0,0,.05)" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"12px", padding:"12px 14px" }}>
+        <button onClick={onToggle}
+          style={{ width:"30px", height:"30px", borderRadius:"50%",
+                   border:`2px solid ${item.done?"#1A1714":"#CDC5BC"}`,
+                   background:item.done?"#1A1714":"transparent", color:"white", display:"flex", alignItems:"center",
+                   justifyContent:"center", flexShrink:0, cursor:"pointer", fontSize:"13px", fontWeight:800 }}>
+          {item.done&&<span className="check-pop">✓</span>}
+        </button>
+        <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={()=>setExp(!exp)}>
+          <div style={{ fontWeight:600, fontSize:"15px", color:item.done?"#A09488":"#1C1917",
+                        textDecoration:item.done?"line-through":"none", letterSpacing:"-0.1px" }}>{item.ingredient}</div>
+          <div style={{ display:"flex", gap:"5px", marginTop:"3px", flexWrap:"wrap" }}>
+            {item.qtyMagasin  && <span style={{ fontSize:"11px", background:"#F5F2EC", color:"#5A5248", border:"1px solid #DDD9D2", borderRadius:"6px", padding:"1px 7px" }}>🏪 {item.qtyMagasin}{item.unit}</span>}
+            {item.qtyDrive    && <span style={{ fontSize:"11px", background:"#F2F5F8", color:"#3A5070", border:"1px solid #C8D8E8", borderRadius:"6px", padding:"1px 7px" }}>🚗 {item.qtyDrive}{item.unit}</span>}
+            {item.qtyChezSoi  && <span style={{ fontSize:"11px", background:"#F3F7F4", color:"#3A5A3A", border:"1px solid #C0D4C0", borderRadius:"6px", padding:"1px 7px" }}>🏠 {item.qtyChezSoi}{item.unit}</span>}
+            <span style={{ fontSize:"11px", color:"#B0A090" }}>{item.category}</span>
+          </div>
+        </div>
+        <button onClick={onRemove} style={{ background:"none", border:"none", fontSize:"20px", color:"#D0C8BC", cursor:"pointer", padding:"4px", lineHeight:1 }}>×</button>
+      </div>
+      {exp && (
+        <div style={{ borderTop:"1px solid #F0EAE2", padding:"10px 12px", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px" }}>
+          <div>
+            <label style={{ ...S.label, color:"#B8860B" }}>🏪 Magasin</label>
+            <div style={{ display:"flex", gap:"4px" }}>
+              <input value={item.qtyMagasin} onChange={e=>onEdit("qtyMagasin",e.target.value)}
+                style={{ flex:1, background:"#FFFBF0", border:"1px solid #F0D88A", borderRadius:"8px", padding:"7px 8px", fontSize:"13px", outline:"none", minWidth:0 }} />
+              <select value={item.unit} onChange={e=>onEdit("unit",e.target.value)}
+                style={{ background:"white", border:"1px solid #E8E0D6", borderRadius:"8px", padding:"7px 4px", fontSize:"12px", outline:"none" }}>
+                {UNITS.map(u=><option key={u}>{u}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ ...S.label, color:"#1D4ED8" }}>🚗 Drive</label>
+            <input value={item.qtyDrive||""} onChange={e=>onEdit("qtyDrive",e.target.value)}
+              style={{ width:"100%", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:"8px", padding:"7px 8px", fontSize:"13px", outline:"none" }} />
+          </div>
+          <div>
+            <label style={{ ...S.label, color:"#166534" }}>🏠 Chez moi</label>
+            <input value={item.qtyChezSoi||""} onChange={e=>onEdit("qtyChezSoi",e.target.value)}
+              style={{ width:"100%", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:"8px", padding:"7px 8px", fontSize:"13px", outline:"none" }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  BILAN
+// ═════════════════════════════════════════════════════════════════════════════
+function BilanTab({ data }) {
+  const { courses = [], config } = data;
+  const [view, setView] = useState("all");
+  const byCat = CATS.map(cat => ({
+    cat,
+    magasin:  courses.filter(c=>c.category===cat&&c.qtyMagasin),
+    drive:    courses.filter(c=>c.category===cat&&c.qtyDrive),
+    chezSoi:  courses.filter(c=>c.category===cat&&c.qtyChezSoi),
+  })).filter(x=>x.magasin.length+x.drive.length+x.chezSoi.length>0);
+  const totM  = courses.filter(c=>c.qtyMagasin).length;
+  const totD  = courses.filter(c=>c.qtyDrive).length;
+  const totC  = courses.filter(c=>c.qtyChezSoi).length;
+  const doneM = courses.filter(c=>c.qtyMagasin&&c.done).length;
+  const doneD = courses.filter(c=>c.qtyDrive&&c.done).length;
+  const doneC = courses.filter(c=>c.qtyChezSoi&&c.done).length;
+
+  if (!byCat.length) return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                  height:"240px", color:"#C4B9AD", padding:"20px", textAlign:"center" }}>
+      <div style={{ fontSize:"40px", marginBottom:"10px" }}>📊</div>
+      <p style={{ fontSize:"13px", lineHeight:"1.5" }}>Ajoutez des articles dans 🛒 Courses pour voir le bilan par rayon</p>
+    </div>
+  );
+
+  return (
+    <div style={{ padding:"12px" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:"12px" }}>
+        {[
+          {val:totM-doneM,tot:totM,done:doneM,icon:"🏪",lbl:"Magasin"},
+          {val:totD-doneD,tot:totD,done:doneD,icon:"🚗",lbl:"Drive"},
+          {val:totC-doneC,tot:totC,done:doneC,icon:"🏠",lbl:"Chez moi"},
+        ].map(({val,tot,done,icon,lbl})=>(
+          <div key={lbl} style={{ background:"white", border:"1px solid #E4E0D8", borderRadius:"14px",
+                                   padding:"12px 8px", textAlign:"center",
+                                   boxShadow:"0 1px 3px rgba(0,0,0,.04)" }}>
+            <div style={{ fontSize:"13px", marginBottom:"4px" }}>{icon}</div>
+            <div style={{ fontSize:"26px", fontWeight:700, color:"#1A1714", lineHeight:1 }}>{val}</div>
+            <div style={{ fontSize:"10px", color:"#9A9289", marginTop:"5px", fontWeight:600,
+                           letterSpacing:".4px", textTransform:"uppercase" }}>{lbl}</div>
+            <div style={{ fontSize:"10px", color:"#B8B2AA", marginTop:"2px" }}>{done}/{tot}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:"6px", marginBottom:"12px" }}>
+        {[["all","Tout"],["magasin","🏪 Magasin"],["drive","🚗 Drive"],["maison","🏠 Chez moi"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setView(v)}
+            style={{ flex:1, padding:"8px 4px", fontSize:"11px", fontWeight:600,
+                     borderRadius:"10px", cursor:"pointer",
+                     background:view===v?"#1A1714":"white", color:view===v?"white":"#7A7468",
+                     border:"1px solid " + (view===v?"#1A1714":"#E4E0D8") }}>{l}</button>
+        ))}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+        {byCat.map(({cat,magasin,drive,chezSoi})=>{
+          const showM=(view==="all"||view==="magasin")&&magasin.length>0;
+          const showD=(view==="all"||view==="drive")&&drive.length>0;
+          const showC=(view==="all"||view==="maison")&&chezSoi.length>0;
+          if(!showM&&!showD&&!showC) return null;
+          return (
+            <div key={cat} style={S.card}>
+              <div style={{ background:"#FAFAF8", padding:"9px 14px", borderBottom:"1px solid #E8E4DE", fontSize:"12px", fontWeight:700, color:"#1A1714", letterSpacing:".1px" }}>{cat}</div>
+              {showM && magasin.map(item =><ItemRow key={item.id}     item={item} type="magasin" config={config} />)}
+              {showD && drive.map(item   =><ItemRow key={item.id+"d"} item={item} type="drive"   config={config} />)}
+              {showC && chezSoi.map(item =><ItemRow key={item.id+"c"} item={item} type="maison"  config={config} />)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ItemRow({ item, type, config }) {
+  const cp = CP[item.couple]||CP[0];
+  const qty = type==="magasin"?item.qtyMagasin:type==="drive"?item.qtyDrive:item.qtyChezSoi;
+  const typeStyle = type==="magasin"
+    ? { bg:"#F7F4EF", color:"#5A5248", border:"#DDD9D2", icon:"🏪" }
+    : type==="drive"
+    ? { bg:"#F4F6F8", color:"#3A5070", border:"#C8D8E8", icon:"🚗" }
+    : { bg:"#F4F7F4", color:"#3A5A3A", border:"#C0D4C0", icon:"🏠" };
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:"10px", padding:"10px 14px",
+                  borderBottom:"1px solid #F8F4EE", opacity:item.done?0.45:1 }}>
+      <span style={{ fontSize:"11px", background:typeStyle.bg, color:typeStyle.color,
+                     border:`1px solid ${typeStyle.border}`, borderRadius:"6px", padding:"2px 6px", flexShrink:0 }}>
+        {typeStyle.icon}
+      </span>
+      <span style={{ flex:1, fontSize:"14px", color:"#1A1A1A", textDecoration:item.done?"line-through":"none", fontWeight:500 }}>{item.ingredient}</span>
+      <span style={{ fontSize:"13px", fontWeight:700, color:"#4A3D30" }}>{qty} {item.unit}</span>
+      <div style={{ width:"8px", height:"8px", borderRadius:"50%", background:cp.dot, flexShrink:0 }} title={config.couples[item.couple]} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CONFIG
+// ═════════════════════════════════════════════════════════════════════════════
+function ConfigTab({ data, update }) {
+  const { config } = data;
+  const [confirm, setConfirm] = useState(false);
+  const [removeIdx, setRemoveIdx] = useState(null);
+
+  const addCouple = () => {
+    if (config.couples.length >= CP_MAX) return;
+    update(d => { d.config.couples.push("Nouvelle famille"); return d; });
+  };
+
+  const removeCouple = (idx) => {
+    const used = [
+      ...data.planning.filter(d => d.midiCouple===idx || d.soirCouple===idx),
+      ...data.courses.filter(c => c.couple===idx),
+    ];
+    if (used.length > 0) { setRemoveIdx(idx); return; } // show confirm
+    doRemove(idx);
+  };
+
+  const doRemove = (idx) => {
+    update(d => {
+      d.config.couples.splice(idx, 1);
+      // Reassign planning
+      d.planning.forEach(day => {
+        if (day.midiCouple === idx) day.midiCouple = 0;
+        else if (day.midiCouple > idx) day.midiCouple--;
+        if (day.soirCouple === idx) day.soirCouple = 0;
+        else if (day.soirCouple > idx) day.soirCouple--;
+      });
+      // Reassign courses
+      d.courses.forEach(c => {
+        if (c.couple === idx) c.couple = 0;
+        else if (c.couple > idx) c.couple--;
+      });
+      return d;
+    });
+    setRemoveIdx(null);
+  };
+
+  return (
+    <div style={{ padding:"14px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      {/* Semaine */}
+      <div style={S.card}>
+        <div style={{ padding:"16px" }}>
+          <h3 style={{ fontWeight:800, color:"#1C1917", marginBottom:"14px", fontSize:"16px", letterSpacing:"-0.2px" }}>📅 Période</h3>
+          <label style={S.label}>Date de début</label>
+          <input type="date" value={config.startDate||""}
+            onChange={e=>update(d=>{d.config.startDate=e.target.value;return d;})}
+            style={{ ...S.input, marginBottom:"14px" }} />
+          <label style={S.label}>Nombre de jours</label>
+          <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+            <input type="range" min={2} max={30} value={config.numDays||data.planning.length}
+              onChange={e=>{
+                const n=+e.target.value;
+                update(d=>{
+                  const nC=d.config.couples.length;
+                  while(d.planning.length<n) d.planning.push(makePlanDay(d.config.startDate,d.planning.length,nC));
+                  if(d.planning.length>n) d.planning=d.planning.slice(0,n);
+                  d.config.numDays=n;
+                  return d;
+                });
+              }}
+              style={{ flex:1, accentColor:"#2C4A3E" }} />
+            <span style={{ fontSize:"20px", fontWeight:700, color:"#2C4A3E", minWidth:"28px", textAlign:"center" }}>
+              {config.numDays||data.planning.length}
+            </span>
+          </div>
+          <div style={{ fontSize:"12px", color:"#9C8C7C", marginTop:"6px", textAlign:"center" }}>
+            Du <strong>{fmtDate(config.startDate,0)}</strong> au <strong>{fmtDate(config.startDate,(config.numDays||data.planning.length)-1)}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Couples */}
+      <div style={S.card}>
+        <div style={{ padding:"16px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"14px" }}>
+            <h3 style={{ fontWeight:800, color:"#1C1917", fontSize:"16px", letterSpacing:"-0.2px" }}>👫 Couples</h3>
+            <span style={{ fontSize:"11px", color:"#9C8C7C" }}>{config.couples.length}/{CP_MAX}</span>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+            {config.couples.map((name,i) => {
+              const cp = CP[i] || CP[CP.length-1];
+              const midiCount = data.planning.filter(d=>d.midiCouple===i).length;
+              const soirCount = data.planning.filter(d=>d.soirCouple===i).length;
+              const coursesCount = (data.courses||[]).filter(c=>c.couple===i).length;
+              return (
+                <div key={i}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                    <div style={{ width:"10px", height:"10px", borderRadius:"50%", background:cp.dot, flexShrink:0 }} />
+                    <input value={name} onChange={e=>update(d=>{d.config.couples[i]=e.target.value;return d;})}
+                      style={{ flex:1, background:cp.light, border:`1px solid ${cp.mid}`, borderRadius:"10px",
+                               padding:"10px 12px", fontSize:"14px", outline:"none", color:cp.dark, fontWeight:600 }} />
+                    {config.couples.length > 1 && (
+                      <button onClick={()=>removeCouple(i)}
+                        style={{ background:"#FFF1F2", border:"1px solid #FECDD3", color:"#E11D48", borderRadius:"8px",
+                                 padding:"8px 10px", fontSize:"16px", cursor:"pointer", flexShrink:0, lineHeight:1 }}>
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize:"11px", color:"#B0A090", marginTop:"3px", marginLeft:"18px" }}>
+                    {midiCount>0 && `☀️ ${midiCount} midi${midiCount>1?"s":""}`}
+                    {midiCount>0 && soirCount>0 && " · "}
+                    {soirCount>0 && `🌙 ${soirCount} soir${soirCount>1?"s":""}`}
+                    {coursesCount>0 && ` · 🛒 ${coursesCount} article${coursesCount>1?"s":""}`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {config.couples.length < CP_MAX && (
+            <button onClick={addCouple}
+              style={{ width:"100%", marginTop:"12px", border:"2px dashed #E8E0D6", background:"transparent",
+                       borderRadius:"10px", padding:"11px", fontSize:"14px", fontWeight:600, color:"#9C8C7C",
+                       cursor:"pointer" }}>
+              + Ajouter un couple
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Confirm remove modal */}
+      {removeIdx !== null && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:50,
+                      display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div style={{ background:"white", borderRadius:"16px", padding:"20px", maxWidth:"340px", width:"100%" }}>
+            <p style={{ fontWeight:700, fontSize:"15px", color:"#1A1A1A", marginBottom:"8px" }}>Supprimer ce couple ?</p>
+            <p style={{ fontSize:"13px", color:"#9C8C7C", marginBottom:"16px", lineHeight:"1.5" }}>
+              Ce couple est assigné à des jours ou des courses. Ces entrées seront réassignées au premier couple.
+            </p>
+            <div style={{ display:"flex", gap:"8px" }}>
+              <button onClick={()=>setRemoveIdx(null)}
+                style={{ flex:1, background:"white", border:"1px solid #E8E0D6", color:"#4A3D30",
+                         borderRadius:"10px", padding:"11px", fontSize:"13px", cursor:"pointer" }}>
+                Annuler
+              </button>
+              <button onClick={()=>doRemove(removeIdx)}
+                style={{ flex:1, background:"#E11D48", border:"none", color:"white",
+                         borderRadius:"10px", padding:"11px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
+                Supprimer quand même
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Partage / reset */}
+      <div style={S.card}>
+        <div style={{ padding:"14px" }}>
+          <h3 style={{ fontWeight:700, color:"#1A1A1A", marginBottom:"8px" }}>🔄 Partage</h3>
+          <p style={{ fontSize:"12px", color:"#9C8C7C", lineHeight:"1.6", marginBottom:"12px" }}>
+            Données partagées entre toutes les familles — sync automatique toutes les 20 secondes.
+          </p>
+          {!confirm
+            ? <button onClick={()=>setConfirm(true)} style={{ width:"100%", background:"white", border:"1px solid #E4E0D8", color:"#7A7468", borderRadius:"10px", padding:"11px", fontSize:"13px", fontWeight:500, cursor:"pointer" }}>Réinitialiser</button>
+            : <div>
+                <p style={{ fontSize:"13px", color:"#E11D48", textAlign:"center", marginBottom:"10px", fontWeight:600 }}>Effacer tout ?</p>
+                <div style={{ display:"flex", gap:"8px" }}>
+                  <button onClick={()=>setConfirm(false)} style={{ flex:1, background:"white", border:"1px solid #E8E0D6", color:"#4A3D30", borderRadius:"10px", padding:"11px", fontSize:"13px", cursor:"pointer" }}>Annuler</button>
+                  <button onClick={()=>{update(()=>defaultData());setConfirm(false);}} style={{ flex:1, background:"#1A1714", border:"none", color:"white", borderRadius:"10px", padding:"11px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Confirmer</button>
+                </div>
+              </div>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mount ─────────────────────────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
